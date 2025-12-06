@@ -1,22 +1,16 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_ALOC_API_URL || 'https://questions.aloc.com.ng/api/v2'
-const ACCESS_TOKEN = import.meta.env.VITE_ALOC_ACCESS_TOKEN || ''
+const API_URL = 'https://questions.aloc.com.ng/api/v2'
+const ACCESS_TOKEN = 'QB-1e5c5f1553ccd8cd9e11'
 
 const apiClient = axios.create({
   baseURL: API_URL,
   headers: {
     'Accept': 'application/json',
     'Content-Type': 'application/json',
+    'AccessToken': ACCESS_TOKEN,
   },
   timeout: 30000,
-})
-
-apiClient.interceptors.request.use((config) => {
-  if (ACCESS_TOKEN) {
-    config.headers['AccessToken'] = ACCESS_TOKEN
-  }
-  return config
 })
 
 apiClient.interceptors.response.use(
@@ -36,7 +30,7 @@ const getCacheKey = (subject, count, year, type) => {
 export const alocAPI = {
   async getQuestion(subject, year = null) {
     try {
-      let url = `/q?subject=${subject}&type=utme`
+      let url = `/q/1?subject=${subject}&type=utme`
       if (year) {
         url += `&year=${year}`
       }
@@ -83,7 +77,7 @@ export const alocAPI = {
 
   async getBulkQuestions(subject, count = 40) {
     try {
-      const url = `/m?subject=${subject}&type=utme`
+      const url = `/m/${count}?subject=${subject}&type=utme`
       const response = await apiClient.get(url)
       let questions = response.data.data || response.data || []
       
@@ -98,16 +92,6 @@ export const alocAPI = {
       return formattedQuestions
     } catch (error) {
       throw new Error(`Failed to fetch bulk questions: ${error.message}`)
-    }
-  },
-
-  async getSubjectMetrics() {
-    try {
-      const response = await apiClient.get('/metrics/subjects')
-      return response.data
-    } catch (error) {
-      console.warn('Could not fetch metrics:', error.message)
-      return null
     }
   },
 
@@ -156,22 +140,11 @@ export async function loadQuestionsForExam(subjects) {
       let questions = await alocAPI.getMultipleQuestions(subject.id, count)
       
       if (questions.length < count) {
-        const additionalQuestions = await alocAPI.getBulkQuestions(subject.id, count - questions.length)
-        questions = [...questions, ...additionalQuestions]
-      }
-      
-      if (questions.length < count) {
-        const existingIds = new Set(questions.map(q => q.id))
-        while (questions.length < count) {
-          try {
-            const randomQ = await alocAPI.getQuestion(subject.id)
-            if (randomQ && randomQ.data && !existingIds.has(randomQ.data.id)) {
-              questions.push(formatQuestion(randomQ.data, questions.length, subject.id))
-              existingIds.add(randomQ.data.id)
-            }
-          } catch (e) {
-            break
-          }
+        try {
+          const additionalQuestions = await alocAPI.getBulkQuestions(subject.id, count - questions.length)
+          questions = [...questions, ...additionalQuestions]
+        } catch (e) {
+          console.warn(`Could not fetch additional questions for ${subject.name}`)
         }
       }
       
@@ -191,14 +164,18 @@ export async function loadPracticeQuestions(subject, count = 40, year = null) {
     let questions = await alocAPI.getMultipleQuestions(subject.id, count, year)
     
     if (questions.length < count) {
-      const bulkQuestions = await alocAPI.getBulkQuestions(subject.id, count)
-      const existingIds = new Set(questions.map(q => q.id))
-      
-      bulkQuestions.forEach(q => {
-        if (!existingIds.has(q.id) && questions.length < count) {
-          questions.push(q)
-        }
-      })
+      try {
+        const bulkQuestions = await alocAPI.getBulkQuestions(subject.id, count)
+        const existingIds = new Set(questions.map(q => q.id))
+        
+        bulkQuestions.forEach(q => {
+          if (!existingIds.has(q.id) && questions.length < count) {
+            questions.push(q)
+          }
+        })
+      } catch (e) {
+        console.warn('Could not fetch additional practice questions')
+      }
     }
     
     return questions.slice(0, count)
